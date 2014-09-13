@@ -10,7 +10,7 @@
 
 // Type substitutions.
 
-use middle::ty;
+use middle::ty::{mod, Ty};
 use middle::ty_fold;
 use middle::ty_fold::{TypeFoldable, TypeFolder};
 use util::ppaux::Repr;
@@ -30,7 +30,7 @@ use syntax::codemap::{Span, DUMMY_SP};
  */
 #[deriving(Clone, PartialEq, Eq, Hash, Show)]
 pub struct Substs {
-    pub types: VecPerParamSpace<ty::t>,
+    pub types: VecPerParamSpace<Ty>,
     pub regions: RegionSubsts,
 }
 
@@ -45,14 +45,14 @@ pub enum RegionSubsts {
 }
 
 impl Substs {
-    pub fn new(t: VecPerParamSpace<ty::t>,
+    pub fn new(t: VecPerParamSpace<Ty>,
                r: VecPerParamSpace<ty::Region>)
                -> Substs
     {
         Substs { types: t, regions: NonerasedRegions(r) }
     }
 
-    pub fn new_type(t: Vec<ty::t>,
+    pub fn new_type(t: Vec<Ty>,
                     r: Vec<ty::Region>)
                     -> Substs
     {
@@ -60,17 +60,17 @@ impl Substs {
                     VecPerParamSpace::new(r, Vec::new(), Vec::new(), Vec::new()))
     }
 
-    pub fn new_trait(t: Vec<ty::t>,
+    pub fn new_trait(t: Vec<Ty>,
                      r: Vec<ty::Region>,
-                     a: Vec<ty::t>,
-                     s: ty::t)
+                     a: Vec<Ty>,
+                     s: Ty)
                     -> Substs
     {
         Substs::new(VecPerParamSpace::new(t, vec!(s), a, Vec::new()),
                     VecPerParamSpace::new(r, Vec::new(), Vec::new(), Vec::new()))
     }
 
-    pub fn erased(t: VecPerParamSpace<ty::t>) -> Substs
+    pub fn erased(t: VecPerParamSpace<Ty>) -> Substs
     {
         Substs { types: t, regions: ErasedRegions }
     }
@@ -98,11 +98,11 @@ impl Substs {
         regions_is_noop && self.types.is_empty()
     }
 
-    pub fn self_ty(&self) -> Option<ty::t> {
+    pub fn self_ty(&self) -> Option<Ty> {
         self.types.get_self().map(|&t| t)
     }
 
-    pub fn with_self_ty(&self, self_ty: ty::t) -> Substs {
+    pub fn with_self_ty(&self, self_ty: Ty) -> Substs {
         assert!(self.self_ty().is_none());
         let mut s = (*self).clone();
         s.types.push(SelfSpace, self_ty);
@@ -141,7 +141,7 @@ impl Substs {
     }
 
     pub fn with_method(self,
-                       m_types: Vec<ty::t>,
+                       m_types: Vec<Ty>,
                        m_regions: Vec<ty::Region>)
                        -> Substs
     {
@@ -499,7 +499,7 @@ struct SubstFolder<'a, 'tcx: 'a> {
     span: Option<Span>,
 
     // The root type that is being substituted, if available.
-    root_ty: Option<ty::t>,
+    root_ty: Option<Ty>,
 
     // Depth of type stack
     ty_stack_depth: uint,
@@ -540,7 +540,7 @@ impl<'a, 'tcx> TypeFolder<'tcx> for SubstFolder<'a, 'tcx> {
         }
     }
 
-    fn fold_ty(&mut self, t: ty::t) -> ty::t {
+    fn fold_ty(&mut self, t: Ty) -> Ty {
         if !ty::type_needs_subst(t) {
             return t;
         }
@@ -576,11 +576,11 @@ impl<'a, 'tcx> TypeFolder<'tcx> for SubstFolder<'a, 'tcx> {
 
         fn check(this: &SubstFolder,
                  p: ty::ParamTy,
-                 source_ty: ty::t,
-                 opt_ty: Option<&ty::t>,
+                 source_ty: Ty,
+                 opt_ty: Option<&Ty>,
                  space: ParamSpace,
                  index: uint)
-                 -> ty::t {
+                 -> Ty {
             match opt_ty {
                 Some(t) => *t,
                 None => {
