@@ -583,7 +583,7 @@ impl<'a, 'tcx> BorrowckCtxt<'a, 'tcx> {
         fn move_suggestion<'tcx>(tcx: &ty::ctxt<'tcx>, ty: Ty<'tcx>,
                                  default_msgs: (&'static str, &'static str))
                                  -> (&'static str, &'static str) {
-            match ty::get(ty).sty {
+            match ty.sty {
                 ty::ty_closure(box ty::ClosureTy {
                         store: ty::RegionTraitStore(..),
                         ..

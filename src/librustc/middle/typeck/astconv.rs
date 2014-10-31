@@ -1267,7 +1267,7 @@ fn determine_explicit_self_category<'a, 'tcx, AC: AstConv<'tcx>,
                 }
             }
 
-            match ty::get(explicit_type).sty {
+            match explicit_type.sty {
                 ty::ty_rptr(region, tm) => {
                     typeck::require_same_types(
                         this.tcx(),
