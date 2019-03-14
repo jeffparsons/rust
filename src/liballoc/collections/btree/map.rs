@@ -867,6 +867,24 @@ impl<K: Ord, V> BTreeMap<K, V> {
         }
     }
 
+    #[unstable(feature = "btree_cursor", issue = "1338")]
+    pub fn cursor_mut_start(&mut self) -> CursorMut<'_, K, V>
+    {
+        if self.is_empty() {
+            panic!("Map is empty");
+        }
+
+        let mut cursor = CursorMut {
+            current_kv: None,
+            next_edge: Some(first_leaf_edge(self.root.as_mut())),
+            current_index: 0,
+            length: &mut self.length,
+            _marker: PhantomData,
+        };
+        unsafe { cursor.move_next_unchecked(); }
+        cursor
+    }
+
     /// Gets the given key's corresponding entry in the map for in-place manipulation.
     ///
     /// # Examples
@@ -2580,6 +2598,78 @@ impl<K: Ord, V, I: Iterator<Item = (K, V)>> Iterator for MergeIter<K, V, I> {
             Ordering::Equal => {
                 self.left.next();
                 self.right.next()
+            }
+        }
+    }
+}
+
+#[unstable(feature = "btree_cursor", issue = "1338")]
+pub struct CursorMut<'a, K: 'a, V: 'a> {
+    current_kv: Option<Handle<NodeRef<marker::Mut<'a>, K, V, marker::LeafOrInternal>, marker::KV>>,
+    next_edge: Option<Handle<NodeRef<marker::Mut<'a>, K, V, marker::Leaf>, marker::Edge>>,
+    // Meaningless unless `current_edge`/`current_kv` are `Some(_)`.
+    current_index: usize,
+    length: &'a mut usize,
+
+    // Be invariant in `K` and `V`
+    _marker: PhantomData<&'a mut (K, V)>,
+}
+
+impl<'a, K, V> CursorMut<'a, K, V> {
+    #[unstable(feature = "btree_cursor", issue = "1338")]
+    pub fn current(&mut self) -> Option<(&'a K, &'a mut V)> {
+        unsafe { ptr::read(&self.current_kv) }.map(|handle| {
+            let kv = handle.into_kv_mut();
+            // Coerce k from `&mut K` to `&K`.
+            (&*kv.0, kv.1)
+        })
+    }
+
+    #[unstable(feature = "btree_cursor", issue = "1338")]
+    pub fn move_next(&mut self) {
+        if self.current_kv.is_none() {
+            panic!("Attempted to move nil cursor");
+        }
+
+        if self.current_index >= *self.length - 1 {
+            // We're about to move off the right end.
+            self.current_kv = None;
+            self.next_edge = None;
+            return;
+        }
+
+        self.current_index += 1;
+        unsafe { self.move_next_unchecked() };
+    }
+
+    // Doesn't move the current index;
+    // we use `move_next_unchecked` in initialization, too.
+    unsafe fn move_next_unchecked(&mut self) {
+        let handle = unwrap_unchecked(ptr::read(&self.next_edge));
+
+        let mut cur_handle = match handle.right_kv() {
+            Ok(kv) => {
+                self.next_edge = Some(ptr::read(&kv).right_edge());
+                self.current_kv = Some(kv.forget_type());
+                return;
+            }
+            Err(last_edge) => {
+                let next_level = last_edge.into_node().ascend().ok();
+                unwrap_unchecked(next_level)
+            }
+        };
+
+        loop {
+            match cur_handle.right_kv() {
+                Ok(kv) => {
+                    self.next_edge = Some(first_leaf_edge(ptr::read(&kv).right_edge().descend()));
+                    self.current_kv = Some(kv.forget_type());
+                    return;
+                }
+                Err(last_edge) => {
+                    let next_level = last_edge.into_node().ascend().ok();
+                    cur_handle = unwrap_unchecked(next_level);
+                }
             }
         }
     }

@@ -956,6 +956,16 @@ impl<BorrowType, K, V, NodeType, HandleType>
             _marker: PhantomData
         }
     }
+
+    /// Removes any static information about whether the underlying node is a `Leaf` or an
+    /// `Internal` node.
+    pub fn forget_type(self) -> Handle<NodeRef<BorrowType, K, V, marker::LeafOrInternal>, HandleType> {
+        Handle {
+            node: self.node.forget_type(),
+            idx: self.idx,
+            _marker: self._marker,
+        }
+    }
 }
 
 impl<'a, K, V, NodeType, HandleType>

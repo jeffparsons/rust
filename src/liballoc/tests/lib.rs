@@ -7,6 +7,7 @@
 #![feature(try_reserve)]
 #![feature(unboxed_closures)]
 #![feature(vecdeque_rotate)]
+#![feature(btree_cursor)]
 
 use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;

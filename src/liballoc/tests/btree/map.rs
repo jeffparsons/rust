@@ -705,3 +705,25 @@ fn test_split_off_large_random_sorted() {
     assert!(map.into_iter().eq(data.clone().into_iter().filter(|x| x.0 < key)));
     assert!(right.into_iter().eq(data.into_iter().filter(|x| x.0 >= key)));
 }
+
+#[test]
+fn test_cursor() {
+    #[cfg(not(miri))] // Miri is too slow
+    let size = 10000;
+    #[cfg(miri)]
+    let size = 200;
+
+    let mut map: BTreeMap<_, _> = (0..size).map(|i| (i, i)).collect();
+
+    // Forwards
+    let mut cursor = map.cursor_mut_start();
+    for i in 0..size {
+        let kv = cursor.current().unwrap();
+        assert_eq!((*kv.0, *kv.1), (i, i));
+        cursor.move_next();
+    }
+    assert_eq!(cursor.current(), None);
+
+    // TODO(jeffparsons): Combinations of mutability,
+    // where cursor starts, etc.
+}

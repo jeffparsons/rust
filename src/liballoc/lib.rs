@@ -115,6 +115,7 @@
 #![feature(maybe_uninit, maybe_uninit_slice, maybe_uninit_array)]
 #![feature(alloc_layout_extra)]
 #![feature(try_trait)]
+#![feature(btree_cursor)]
 
 // Allow testing this library
 
