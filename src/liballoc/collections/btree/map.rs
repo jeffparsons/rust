@@ -2631,7 +2631,7 @@ impl<'a, K, V> CursorMut<'a, K, V> {
             panic!("Attempted to move nil cursor");
         }
 
-        if self.current_index >= *self.length - 1 {
+        if self.current_index == *self.length - 1 {
             // We're about to move off the right end.
             self.current_kv = None;
             self.next_edge = None;
@@ -2672,5 +2672,145 @@ impl<'a, K, V> CursorMut<'a, K, V> {
                 }
             }
         }
+    }
+
+    #[unstable(feature = "btree_cursor", issue = "1338")]
+    pub fn remove(&mut self) -> (K, V) {
+        let current_kv = match self.current_kv.take() {
+            Some(kv) => kv,
+            None => panic!("Attempted to remove via nil cursor"),
+        };
+
+        *self.length -= 1;
+
+        let (hole, old_key, old_val) = match current_kv.force() {
+            Leaf(leaf) => {
+                let (hole, old_key, old_val) = leaf.remove();
+                (hole, old_key, old_val)
+            }
+            Internal(mut internal) => {
+                let key_loc = internal.kv_mut().0 as *mut K;
+                let val_loc = internal.kv_mut().1 as *mut V;
+
+                let to_remove = first_leaf_edge(internal.right_edge().descend()).right_kv().ok();
+                let to_remove = unsafe { unwrap_unchecked(to_remove) };
+
+                let (hole, key, val) = to_remove.remove();
+
+                let old_key = unsafe { mem::replace(&mut *key_loc, key) };
+                let old_val = unsafe { mem::replace(&mut *val_loc, val) };
+
+                (hole, old_key, old_val)
+            }
+        };
+
+        let small_leaf = unsafe { ptr::read(&hole).into_node() };
+
+        // Handle underfull node.
+        let mut cur_node = small_leaf.forget_type();
+        let mut hole = hole.forget_type();
+        let mut hole_in_underfull_node = Some(&mut hole);
+        while cur_node.len() < node::CAPACITY / 2 {
+            match handle_underfull_node_track_edge(cur_node, hole_in_underfull_node) {
+                AtRoot => break,
+                EmptyParent(_) => unreachable!(),
+                Merged(parent) => {
+                    if parent.len() == 0 {
+                        // We must be at the root
+                        parent.into_root_mut().pop_level();
+                        break;
+                    } else {
+                        cur_node = parent.forget_type();
+                    }
+                }
+                Stole(_) => break,
+            }
+
+            // Only (maybe) update the position of the hole
+            // on the first iteration; that's the only time
+            // we might need to fix up the underfull node
+            // that the hole is in.
+            hole_in_underfull_node = None;
+        }
+
+        if *self.length == 0 {
+            self.current_kv = None;
+            self.next_edge = None;
+        } else {
+            // Next edge will lead to the KV immediately
+            // following the one we removed.
+            self.next_edge = match hole.force() {
+                Leaf(leaf) => Some(leaf),
+                Internal(_internal) => unreachable!(),
+            };
+            unsafe { self.move_next_unchecked() };
+        }
+
+        (old_key, old_val)
+    }
+}
+
+// Like `handle_underfull_node` but for when we need
+// to know where the hole (edge) following the removed
+// KV ends up.
+//
+// TODO(jeffparsons): Benchmark using this in `EntryMap::remove_kv`
+// and replace `handle_underfull_node` with this iff no significant damage?
+// (This would only be for deduplicating logic — so it would really
+// need to be no discernible damage to justify.)
+fn handle_underfull_node_track_edge<'a, K, V>(
+    underfull_node: NodeRef<marker::Mut<'a>, K, V, marker::LeafOrInternal>,
+    // If provided, will be updated with new location of the hole.
+    hole_in_underfull_node: Option<&mut Handle<NodeRef<marker::Mut<'a>, K, V, marker::LeafOrInternal>, marker::Edge>>,
+) -> UnderflowResult<'a, K, V> {
+    // For updating tracked edge.
+    let underfull_node_len = underfull_node.len();
+
+    let parent_edge = if let Ok(parent_edge) = underfull_node.ascend() {
+        parent_edge
+    } else {
+        return AtRoot;
+    };
+
+    let (is_left_kv, mut kv_handle) = match parent_edge.left_kv() {
+        Ok(left_kv) => (true, left_kv),
+        Err(parent_edge) => {
+            match parent_edge.right_kv() {
+                Ok(right_kv) => (false, right_kv),
+                Err(parent_edge) => {
+                    return EmptyParent(parent_edge.into_node());
+                }
+            }
+        }
+    };
+
+    if kv_handle.can_merge() {
+        let new_edge = kv_handle.merge();
+        if let Some(hole) = hole_in_underfull_node {
+            let mut new_edge_idx = hole.idx();
+            let new_child = unsafe { ptr::read(&new_edge).descend() };
+            if is_left_kv {
+                // Content of node to right of KV will be at the end
+                // of the new node, so offset will be increased by
+                // the difference in node length before and after.
+                let new_child_len = new_child.len();
+                new_edge_idx += new_child_len - underfull_node_len;
+            };
+            *hole = Handle::new_edge(new_child, new_edge_idx);
+        }
+        Merged(new_edge.into_node())
+    } else {
+        if is_left_kv {
+            kv_handle.steal_left();
+            if let Some(hole) = hole_in_underfull_node {
+                unsafe {
+                    let new_hole = ptr::read(hole);
+                    *hole = unwrap_unchecked(new_hole.right_kv().ok()).right_edge();
+                }
+            }
+        } else {
+            kv_handle.steal_right();
+        }
+        Stole(kv_handle.into_node())
     }
 }

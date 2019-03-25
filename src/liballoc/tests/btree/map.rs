@@ -725,5 +725,50 @@ fn test_cursor() {
     assert_eq!(cursor.current(), None);
 
     // TODO(jeffparsons): Combinations of mutability,
-    // where cursor starts, etc.
+    // where cursor starts, direction, etc.
+}
+
+#[test]
+fn test_cursor_remove_all() {
+    #[cfg(not(miri))] // Miri is too slow
+    let size = 10000;
+    #[cfg(miri)]
+    let size = 200;
+
+    let mut map: BTreeMap<_, _> = (0..size).map(|i| (i, i)).collect();
+
+    let mut cursor = map.cursor_mut_start();
+    for i in 0..size {
+        let kv = cursor.remove();
+        assert_eq!(kv, (i, i));
+    }
+    assert_eq!(cursor.current(), None);
+}
+
+#[test]
+fn test_cursor_remove_interesting_pattern() {
+    #[cfg(not(miri))] // Miri is too slow
+    let size = 10000;
+    #[cfg(miri)]
+    let size = 200;
+
+    // Compare elements removed from the same positions
+    // in a BTreeMap and Vec — they should be the same!
+    let mut map: BTreeMap<_, _> = (0..size).map(|i| (i, i)).collect();
+    let mut vec: Vec<_> = (0..size).collect();
+
+    while !map.is_empty() {
+        let mut i = 0;
+        let mut cursor = map.cursor_mut_start();
+        while cursor.current().is_some() {
+            if i % 17 == 0 || i % 19 == 0 {
+                assert_eq!(cursor.remove().0, vec.remove(i));
+            } else {
+                i += 1;
+                cursor.move_next();
+            }
+        }
+
+        assert_eq!(cursor.current(), None);
+    }
 }
